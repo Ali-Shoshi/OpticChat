@@ -1,0 +1,473 @@
+import { ScrollView, CheckBox, Slider, TextEdit } from "std-widgets.slint";
+
+export struct ChatTurn { question: string, answer: string }
+
+export global Colors {
+    in-out property <color> bg: #141820;
+    in-out property <color> fg: #edf2f7;
+    in-out property <color> accent: #a8e6cf;
+}
+component Field inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder-text;
+    in property <InputType> input-type: InputType.text;
+    in property <bool> enabled: true;
+    callback accepted;
+    callback edited;
+    min-width: 40px; min-height: 34px; horizontal-stretch: 1;
+    background: Colors.fg.with-alpha(0.06);
+    border-width: 1px; border-color: editor.has-focus ? Colors.accent : Colors.fg.with-alpha(0.16);
+    border-radius: 8px;
+    Text {x:10px; width: parent.width - 20px;height:parent.height;
+        text:root.placeholder-text;visible:root.text.is-empty;
+        color:Colors.fg.with-alpha(0.45);font-size:12px;vertical-alignment:center;overflow:elide;}
+    editor := TextInput {x:10px;y:6px;width:parent.width - 20px;height:parent.height - 12px;
+        text <=> root.text;input-type:root.input-type;enabled:root.enabled;
+        single-line:true;color:Colors.fg;font-size:13px;
+        selection-background-color:Colors.accent;selection-foreground-color:Colors.bg;
+        accepted=>{root.accepted();}
+        edited=>{root.edited();}
+    }
+    forward-focus: editor;
+}
+component Label inherits Text { color: Colors.fg; font-size: 12px; }
+component Muted inherits Text { color: Colors.fg.with-alpha(0.6); font-size: 11px; wrap: word-wrap; }
+component Action inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    callback clicked;
+    height: 32px; min-width: 60px; border-radius: 8px;
+    background: active ? Colors.accent.with-alpha(0.18) : touch.has-hover ? Colors.fg.with-alpha(0.1) : Colors.fg.with-alpha(0.045);
+    border-width: 1px; border-color: active ? Colors.accent.with-alpha(0.4) : Colors.fg.with-alpha(0.12);
+    Text {text: root.label; color: root.active ? Colors.accent : Colors.fg; font-size: 12px; horizontal-alignment:center;vertical-alignment:center;overflow:elide;}
+    touch := TouchArea { clicked => {root.clicked();} }
+}
+component Tool inherits Rectangle {
+    in property <string> label;
+    in property <bool> lit:false;
+    callback clicked;
+    width:30px;height:32px;border-radius:10px;
+    background:lit ? Colors.fg : touch.has-hover ? Colors.fg.with-alpha(0.12) : transparent;
+    Text {text:root.label;color:root.lit ? Colors.bg : Colors.fg.with-alpha(0.65);font-size:18px;horizontal-alignment:center;vertical-alignment:center;}
+    touch := TouchArea {clicked=>{root.clicked();}}
+}
+component Range inherits Rectangle {
+    in-out property <float> value;
+    height:32px; horizontal-stretch:1;
+    Rectangle {x:8px;y:14px;height:4px;width:max(0px,parent.width - 16px);border-radius:2px;background:Colors.fg.with-alpha(0.16);}
+    Rectangle {x:8px;y:14px;height:4px;width:max(0px,parent.width - 16px)*root.value/100;border-radius:2px;background:Colors.accent;}
+    Rectangle {x:max(0px,parent.width - 16px)*root.value/100;y:8px;width:16px;height:16px;border-radius:8px;background:Colors.accent;}
+    TouchArea {
+        pointer-event(e)=>{if e.kind==PointerEventKind.down {root.value=100*min(1,max(0,(self.mouse-x - 8px)/max(1px,self.width - 16px)));}}
+        moved=>{if self.pressed {root.value=100*min(1,max(0,(self.mouse-x - 8px)/max(1px,self.width - 16px)));}}
+    }
+}
+component Tabs inherits Rectangle {
+    in-out property <int> current;
+    height:32px;
+    for title[index] in ["Connection","Appearance","AI & Screen","Shortcuts"]: Rectangle {
+        x:index*root.width/4;width:root.width/4;height:root.height;
+        background:root.current==index ? Colors.accent.with-alpha(0.055) : touch.has-hover ? Colors.fg.with-alpha(0.035) : transparent;
+        Text {text:title;font-size:12px;font-weight:root.current==index ? 600 : 400;color:root.current==index ? Colors.accent : Colors.fg.with-alpha(0.65);horizontal-alignment:center;vertical-alignment:center;}
+        touch := TouchArea {clicked=>{root.current=index;}}
+    }
+    Rectangle {x:0px;y:parent.height - 1px;width:parent.width;height:1px;background:Colors.fg.with-alpha(0.1);}
+    Rectangle {x:root.current*root.width/4;y:parent.height - 2px;width:root.width/4;height:2px;background:Colors.accent;animate x {duration:180ms;easing:ease-in-out;}}
+}
+component ScreenField inherits Rectangle {
+    in property <string> label;
+    in-out property <string> value;
+    height:36px;
+    HorizontalLayout {spacing:12px;Label {text:root.label;width:175px;vertical-alignment:center;}Field {text <=> root.value;}}
+}
+struct Swatch { hex:string, paint:color }
+component ColorRow inherits Rectangle {
+    in property <string> label;
+    in-out property <string> hex;
+    in property <color> current;
+    callback picked(color);
+    callback edited;
+    height:76px;
+    VerticalLayout {spacing:6px;
+        HorizontalLayout {spacing:10px;
+            Label {text:root.label;min-width:85px;}
+            Rectangle {width:26px;height:26px;border-radius:7px;background:root.current;border-width:1px;border-color:Colors.fg.with-alpha(0.3);}
+            Field {text <=> root.hex;edited=>{root.edited();}}
+        }
+        HorizontalLayout {spacing:6px;
+            for sw in [
+                {hex:"#141820",paint:#141820},{hex:"#242424",paint:#242424},
+                {hex:"#f4f1eb",paint:#f4f1eb},{hex:"#ffffff",paint:#ffffff},
+                {hex:"#a8e6cf",paint:#a8e6cf},{hex:"#83b9ff",paint:#83b9ff},
+                {hex:"#b6a1ff",paint:#b6a1ff},{hex:"#ffa4b8",paint:#ffa4b8},
+                {hex:"#f3cf85",paint:#f3cf85},{hex:"#ef825e",paint:#ef825e}
+            ]: Rectangle {
+                height:25px;border-radius:6px;background:sw.paint;
+                border-width:root.hex==sw.hex ? 2px : 1px;
+                border-color:root.hex==sw.hex ? Colors.accent : Colors.fg.with-alpha(0.2);
+                Text {text:root.hex==sw.hex ? "•" : "";color:#808080;horizontal-alignment:center;vertical-alignment:center;}
+                TouchArea {clicked=>{root.hex=sw.hex;root.picked(sw.paint);}}
+            }
+        }
+    }
+}
+component ShortcutField inherits Rectangle {
+    in-out property <string> value;
+    private property <bool> recording:false;
+    height:34px;
+    keys := FocusScope {focus-on-click:false;
+    HorizontalLayout {spacing:6px;
+        Field {text <=> root.value;}
+        Action {label:root.recording ? "Press keys…" : "Record";width:90px;clicked=>{root.recording=true;keys.focus();}}
+        Tool {label:"×";clicked=>{root.value="";root.recording=false;}}
+    }
+    key-pressed(e)=>{
+        if !root.recording {return reject;}
+        if e.text==Key.Escape {root.recording=false;return accept;}
+        if e.text==Key.Control || e.text==Key.Shift || e.text==Key.Alt || e.text==Key.Meta {return accept;}
+        if !e.modifiers.control && !e.modifiers.alt && !e.modifiers.meta {return accept;}
+        root.value=(e.modifiers.control ? "<Control>" : "")+(e.modifiers.alt ? "<Alt>" : "")+(e.modifiers.shift ? "<Shift>" : "")+(e.modifiers.meta ? "<Super>" : "")+
+            (e.text==Key.LeftArrow ? "Left" : e.text==Key.RightArrow ? "Right" : e.text==Key.UpArrow ? "Up" : e.text==Key.DownArrow ? "Down" : e.text==" " ? "space" : e.text==Key.Return ? "Return" : e.text==Key.F1 ? "F1" : e.text==Key.F2 ? "F2" : e.text==Key.F3 ? "F3" : e.text==Key.F4 ? "F4" : e.text==Key.F5 ? "F5" : e.text==Key.F6 ? "F6" : e.text==Key.F7 ? "F7" : e.text==Key.F8 ? "F8" : e.text==Key.F9 ? "F9" : e.text==Key.F10 ? "F10" : e.text==Key.F11 ? "F11" : e.text==Key.F12 ? "F12" : e.text.to-lowercase());
+        root.recording=false;return accept;
+    }}
+}
+component SettingsPanel inherits Rectangle {
+    in-out property <string> system-prompt;
+    in-out property <float> response-font-size:16;
+    in-out property <bool> keep-on-top:true;
+    background:Colors.bg; border-radius:20px;
+    callback back;callback drag;callback preview-colors;callback quit;
+    in-out property <int> tab:0;
+    in-out property <int> provider-index:0;
+    in-out property <string> model-openai:"gpt-4.1-mini";
+    in-out property <string> model-anthropic;
+    in-out property <string> model-lmstudio;
+    in-out property <string> lmstudio-url:"http://127.0.0.1:1234/v1";
+    in-out property <string> shortcut-window;
+    in-out property <string> shortcut-response;
+    in-out property <string> shortcut-tl;
+    in-out property <string> shortcut-tr;
+    in-out property <string> shortcut-bl;
+    in-out property <string> shortcut-br;
+    in-out property <string> shortcut-input;
+    in-out property <string> shortcut-mic;
+    callback provider-changed;
+    in-out property <string> key;
+    in-out property <string> model;
+    in-out property <[string]> models:[];
+    in-out property <bool> models-loading:false;
+    in-out property <string> models-message:"Select a connection and refresh its model list.";
+    in-out property <string> model-filter;
+    callback key-edited;
+    callback reveal-models;
+    callback filter-models;
+    out property <length> last-control-gap:(root.tab==0 ? connection-last.y+connection-last.height : root.tab==1 ? appearance-last.y+appearance-last.height : root.tab==2 ? screen-last.y+screen-last.height : shortcuts-last.y+shortcuts-last.height) + settings-scroll.content-y - settings-scroll.visible-height;
+    out property <length> scroll-bottom-gap:settings-scroll.content-height + settings-scroll.content-y - settings-scroll.visible-height;
+    reveal-models => {settings-scroll.content-y=-min(160px,max(0px,settings-scroll.content-height - settings-scroll.visible-height));}
+    changed tab => {settings-scroll.content-y=0px;}
+    changed models => {if root.tab==0 && root.models.length>0 {settings-scroll.content-y=-min(160px,max(0px,settings-scroll.content-height - settings-scroll.visible-height));}}
+
+    in-out property <string> bg-hex;
+    in-out property <string> fg-hex;
+    in-out property <string> accent-hex;
+    in-out property <string> bubble-w;
+    in-out property <string> bubble-h;
+    in-out property <float> bubble-alpha:0;
+    in-out property <string> interval;
+    in-out property <string> threshold;
+    in-out property <string> image-width;
+    in-out property <string> quality;
+    in-out property <string> message:"Settings are saved on this computer.";
+    callback save;
+    callback fetch-models;
+    callback install-shortcut;
+    callback clear-frames;
+    callback new-chat;
+    VerticalLayout {padding:20px;spacing:10px;
+        HorizontalLayout {height:32px;spacing:8px;
+            Text {text:"Optic Chat";color:Colors.fg;font-size:20px;font-weight:700;vertical-alignment:center;}
+            Action {label:"× Quit";max-width:70px;clicked=>{root.quit();}}
+            Action {label:"← Back";max-width:70px;clicked=>{root.back();}}
+        }
+        Rectangle {height:32px;Tabs {x:-20px;width:parent.width + 40px;current <=> root.tab;}}
+        settings-scroll := ScrollView { vertical-stretch:1;
+        horizontal-scrollbar-policy:always-off;
+        content-width:self.visible-width;
+        content-height:max(self.visible-height,settings-content.height);
+        settings-content := Rectangle {
+            x:0px;y:0px;width:settings-scroll.visible-width;
+            height:root.tab==0 ? connection-page.height : root.tab==1 ? appearance-page.height : root.tab==2 ? screen-page.height : shortcuts-page.height;
+            connection-page := Rectangle {
+                x:0px;y:0px;width:parent.width;height:connection-content.preferred-height;visible:root.tab==0;
+                connection-content := VerticalLayout {width:parent.width;height:self.preferred-height;padding-right:14px;padding-bottom:20px;spacing:8px;
+            HorizontalLayout {spacing:8px;
+                Action {label:"OpenAI";active:root.provider-index==0;clicked=>{if root.provider-index!=0 {root.provider-index=0;root.provider-changed();}}}
+                Action {label:"Anthropic";active:root.provider-index==1;clicked=>{if root.provider-index!=1 {root.provider-index=1;root.provider-changed();}}}
+                Action {label:"Hermes";active:root.provider-index==2;clicked=>{if root.provider-index!=2 {root.provider-index=2;root.provider-changed();}}}
+                Action {label:"LM Studio";active:root.provider-index==3;clicked=>{if root.provider-index!=3 {root.provider-index=3;root.provider-changed();}}}
+            }
+            if root.provider-index==3: Label {text:"LM STUDIO SERVER ADDRESS";}
+            if root.provider-index==3: Field {text <=> root.lmstudio-url;placeholder-text:"http://127.0.0.1:1234/v1";}
+            Label {text:root.provider-index==3 ? "LM STUDIO TOKEN (OPTIONAL)" : root.provider-index==2 ? "LOCAL HERMES CONNECTION" : root.provider-index==1 ? "ANTHROPIC API KEY" : "OPENAI API KEY";}
+            if root.provider-index!=2: Field {text <=> root.key;input-type:password;placeholder-text:root.provider-index==3 ? "Optional server token" : "Paste a key to replace the saved key";edited=>{root.key-edited();}accepted=>{root.fetch-models();}}
+            if root.provider-index==2: Muted {text:"Uses your existing Hermes ChatGPT/Codex login. No OpenAI API key is needed. The local bridge must be running.";}
+            if root.provider-index==3: Muted {text:"Start the server in LM Studio’s Developer tab, then Refresh models. Screen questions need a vision-capable model. Leave the token blank unless server authentication is enabled.";}
+            if root.provider-index<2: Muted {text:"Stored separately per provider in the Linux keyring. The selected provider’s API-key environment variable takes precedence.";}
+            HorizontalLayout {Label {text:"Model";} Action {label:root.models-loading ? "Loading…" : "Refresh models";clicked=>{root.fetch-models();}}}
+            Field {text <=> root.model;placeholder-text:"Choose below, or enter a model ID";}
+            Muted {text:root.models-message;}
+            Field {text <=> root.model-filter;placeholder-text:"Search available models…";edited=>{root.filter-models();}}
+            if root.models.length > 0: model-scroll := ScrollView {
+                height:144px;horizontal-scrollbar-policy:always-off;
+                content-width:self.visible-width;content-height:root.models.length * 36px + 8px;
+                for id[index] in root.models: Action {x:0px;y:index*36px;width:model-scroll.visible-width - 14px;height:32px;label:id;active:root.model==id;clicked=>{root.model=id;}}
+            }
+            Muted {text:"Models come from the selected connection. Choose one supporting image input and text output.";}
+            connection-last := Action {label:"Start a new conversation";clicked=>{root.new-chat();}}
+        
+                }
+            }
+            appearance-page := Rectangle {
+                x:0px;y:0px;width:parent.width;height:appearance-content.preferred-height;visible:root.tab==1;
+                appearance-content := VerticalLayout {width:parent.width;height:self.preferred-height;padding-right:14px;padding-bottom:20px;spacing:12px;
+            Label {text:"COLOR THEMES";}
+            CheckBox {text:"Always on top";checked <=> root.keep-on-top;}
+            HorizontalLayout {Label {text:"Response text size";}Label {text:round(root.response-font-size)+" px";}}
+            Slider {minimum:12;maximum:28;value <=> root.response-font-size;}
+            HorizontalLayout {spacing:8px;
+                Action {label:"Midnight";clicked=>{root.bg-hex="#141820";root.fg-hex="#edf2f7";root.accent-hex="#a8e6cf";Colors.bg=#141820;Colors.fg=#edf2f7;Colors.accent=#a8e6cf;}}
+                Action {label:"Paper";clicked=>{root.bg-hex="#f4f1eb";root.fg-hex="#242424";root.accent-hex="#385eab";Colors.bg=#f4f1eb;Colors.fg=#242424;Colors.accent=#385eab;}}
+                Action {label:"Plum";clicked=>{root.bg-hex="#241c30";root.fg-hex="#f3ebff";root.accent-hex="#b6a1ff";Colors.bg=#241c30;Colors.fg=#f3ebff;Colors.accent=#b6a1ff;}}
+            }
+            ColorRow {label:"Background";hex <=> root.bg-hex;current:Colors.bg;edited=>{root.preview-colors();}picked(c)=>{Colors.bg=c;}}
+            ColorRow {label:"Text";hex <=> root.fg-hex;current:Colors.fg;edited=>{root.preview-colors();}picked(c)=>{Colors.fg=c;}}
+            ColorRow {label:"Accent";hex <=> root.accent-hex;current:Colors.accent;edited=>{root.preview-colors();}picked(c)=>{Colors.accent=c;}}
+            HorizontalLayout {Label {text:"Reply background";}Label {text:round(root.bubble-alpha)+"% opaque";}}
+            Range {value <=> root.bubble-alpha;}
+            Rectangle {height:54px;border-radius:8px;clip:true;background:#838383;
+                for x in 16: Rectangle {x:x*28px;width:14px;height:54px;background:#bdbdbd;}
+                Rectangle {background:Colors.bg.with-alpha(root.bubble-alpha/100);}
+                Text {text:"Your reply, at this opacity";color:Colors.fg;horizontal-alignment:center;vertical-alignment:center;font-size:14px;}
+            }
+            Muted {text:"0% is fully transparent; 100% is solid. Changes preview immediately. Save to keep them.";}
+            HorizontalLayout {spacing:8px;Label {text:"Width";}Field {text <=> root.bubble-w;}Label {text:"Height";}Field {text <=> root.bubble-h;}}
+            appearance-last := Muted {text:"Edit global keyboard bindings in the Shortcuts tab.";}
+        
+                }
+            }
+            screen-page := Rectangle {
+                x:0px;y:0px;width:parent.width;height:screen-content.preferred-height;visible:root.tab==2;
+                screen-content := VerticalLayout {width:parent.width;height:self.preferred-height;padding-right:14px;padding-bottom:20px;spacing:8px;
+            Label {text:"AI INSTRUCTIONS";}
+            Muted {text:"Edit the system prompt sent with each question. Save to apply it to future responses.";}
+            TextEdit {height:180px;text <=> root.system-prompt;wrap:word-wrap;}
+            Label {text:"SCREEN CAPTURE";}
+            Muted {text:"Share a screen or window from the input bar. Distinct images stay in memory only; the oldest is evicted at 10. Questions include the latest 5, oldest first.";}
+            ScreenField {label:"Sample every (s)";value <=> root.interval;}
+            ScreenField {label:"Changed pixels (%)";value <=> root.threshold;}
+            ScreenField {label:"Maximum width (px)";value <=> root.image-width;}
+            ScreenField {label:"JPEG quality (30–90)";value <=> root.quality;}
+            Muted {text:"Low-detail images reduce model context; compression reduces transfer size. Smaller images can hide small text. Re-share after changing resolution or quality.";}
+            screen-last := Action {label:"Clear all buffered screenshots";clicked=>{root.clear-frames();}}
+        
+                }
+            }
+            shortcuts-page := Rectangle {
+                x:0px;y:0px;width:parent.width;height:shortcuts-content.preferred-height;visible:root.tab==3;
+                shortcuts-content := VerticalLayout {width:parent.width;height:self.preferred-height;spacing:8px;padding-right:14px;padding-bottom:20px;
+                    Muted {text:"Global shortcuts work while other apps have focus. Show / hide launches Optic Chat if it is closed. Quit fully exits.";}
+                    Label {text:"Show / hide app";}ShortcutField {value <=> root.shortcut-window;}
+                    Label {text:"Show / hide reply";}ShortcutField {value <=> root.shortcut-response;}
+                    Label {text:"Focus text input";}ShortcutField {value <=> root.shortcut-input;}
+                    Label {text:"Start / stop microphone";}ShortcutField {value <=> root.shortcut-mic;}
+                    Label {text:"← Move left";}ShortcutField {value <=> root.shortcut-tl;}
+                    Label {text:"↑ Move up";}ShortcutField {value <=> root.shortcut-tr;}
+                    Label {text:"↓ Move down";}ShortcutField {value <=> root.shortcut-bl;}
+                    Label {text:"→ Move right";}ShortcutField {value <=> root.shortcut-br;}
+                    Muted {text:"Use <Control>, <Alt>, <Shift> or <Super>, followed by a key. Example: <Control><Super>Left. Leave blank to disable. Save settings applies these GNOME shortcuts.";}
+                    shortcuts-last := Action {label:"Apply shortcuts";clicked=>{root.install-shortcut();}}
+                }
+            }
+        }
+        }
+        Muted {text:root.message; min-height:28px;}
+        Action {label:"Save settings";active:true;clicked=>{root.save();}}
+    }
+    TouchArea {x:20px;y:14px;width:parent.width - 200px;height:34px;
+        pointer-event(e)=>{if e.kind == PointerEventKind.down {root.drag();}}
+    }
+}
+
+export component InputWindow inherits Window {
+    in-out property <string> system-prompt <=> panel.system-prompt;
+    title:"Optic Chat";no-frame:true;always-on-top:root.keep-on-top;background:transparent;
+    in-out property <bool> keep-on-top <=> panel.keep-on-top;
+    in-out property <bool> settings-open:false;
+    in-out property <bool> reply-visible:false;
+    in-out property <int> bubble-width:620;
+    in-out property <int> bubble-height:280;
+    in-out property <float> screen-width:1920;
+    in-out property <float> screen-height:1080;
+    out property <length> input-height:max(32px,min(three-lines.preferred-height,question-editor.preferred-height));
+    in-out property <string> answer:"Your reply will appear here.";
+    in-out property <string> current-question;
+    in-out property <[ChatTurn]> past-turns:[];
+    in-out property <float> response-font-size <=> panel.response-font-size;
+    callback reveal-response;
+    reveal-response => {reply-scroll.content-y=-(current-turn.y+reply.y);}
+    out property <length> response-start-gap:current-turn.y+reply.y+reply-scroll.content-y;
+    pure callback format-reply(string) -> styled-text;
+    in-out property <string> question;
+    in-out property <bool> recording:false;
+    in-out property <bool> transcribing:false;
+    in-out property <string> voice-status;
+    callback toggle-mic;
+    in property <string> status:"Screen sharing is off";
+    in property <bool> busy:false;
+    in property <bool> sharing:false;
+    private property <float> morph:settings-open ? 1 : 0;
+    animate morph {duration:420ms;easing:cubic-bezier(0.4,0,0.2,1);}
+    private property <bool> transitioning:morph > 0 && morph < 1;
+    private property <float> chat-opacity:max(0,1 - morph*3);
+    private property <length> chat-width:min(screen-width*1px,max(500px,bubble-width*1px));
+    private property <length> chat-height:min(screen-height*1px,input-height+50px+(reply-visible ? bubble-height*1px : 0px));
+    private property <length> settings-width:min(screen-width*1px,500px);
+    private property <length> settings-height:min(screen-height*1px,500px);
+    // Reserve the final native size once, then animate inside it without per-frame OS resizes.
+    width:transitioning ? max(chat-width,settings-width) : morph>=1 ? settings-width : chat-width;
+    height:transitioning ? max(chat-height,settings-height) : morph>=1 ? settings-height : chat-height;
+    callback send;callback settings;callback toggle-share;callback toggle-bubble;callback stop;callback dismiss;callback drag;callback quit;callback preview-colors;
+    in-out property <int> provider-index <=> panel.provider-index;
+    in-out property <string> model-openai <=> panel.model-openai;
+    in-out property <string> model-anthropic <=> panel.model-anthropic;
+    in-out property <string> model-lmstudio <=> panel.model-lmstudio;
+    in-out property <string> lmstudio-url <=> panel.lmstudio-url;
+    in-out property <string> shortcut-window <=> panel.shortcut-window;
+    in-out property <string> shortcut-response <=> panel.shortcut-response;
+    in-out property <string> shortcut-tl <=> panel.shortcut-tl;
+    in-out property <string> shortcut-tr <=> panel.shortcut-tr;
+    in-out property <string> shortcut-bl <=> panel.shortcut-bl;
+    in-out property <string> shortcut-br <=> panel.shortcut-br;
+    in-out property <string> shortcut-input <=> panel.shortcut-input;
+    in-out property <string> shortcut-mic <=> panel.shortcut-mic;
+    callback focus-editor;
+    focus-editor=>{question-editor.focus();}
+    out property <bool> input-focused:question-editor.has-focus;
+    callback provider-changed;
+    in-out property <string> key <=> panel.key;
+    in-out property <string> model <=> panel.model;
+    in-out property <string> bg-hex <=> panel.bg-hex;
+    in-out property <string> fg-hex <=> panel.fg-hex;
+    in-out property <string> accent-hex <=> panel.accent-hex;
+    in-out property <string> bubble-w <=> panel.bubble-w;
+    in-out property <string> bubble-h <=> panel.bubble-h;
+    in-out property <string> interval <=> panel.interval;
+    in-out property <string> threshold <=> panel.threshold;
+    in-out property <string> image-width <=> panel.image-width;
+    in-out property <string> quality <=> panel.quality;
+    in-out property <string> message <=> panel.message;
+    in-out property <[string]> models <=> panel.models;
+    in-out property <bool> models-loading <=> panel.models-loading;
+    in-out property <string> models-message <=> panel.models-message;
+    in-out property <string> model-filter <=> panel.model-filter;
+    callback key-edited;
+    callback reveal-models;
+    reveal-models => {panel.reveal-models();}
+    callback filter-models;
+    out property <length> last-control-gap:panel.last-control-gap;
+    out property <length> settings-scroll-gap:panel.scroll-bottom-gap;
+    out property <length> reply-scroll-gap:reply-scroll.content-height + reply-scroll.content-y - reply-scroll.visible-height;
+    in-out property <int> tab <=> panel.tab;
+    in-out property <float> bubble-alpha <=> panel.bubble-alpha;
+    callback save;
+    callback fetch-models;
+    callback install-shortcut;
+    callback clear-frames;
+    callback new-chat;
+    three-lines := Text {visible:false;text:"A\nA\nA";font-size:15px;}
+    surface := Rectangle {
+    x:0px;y:0px;
+    width:(1-root.morph)*root.chat-width + root.morph*root.settings-width;
+    height:(1-root.morph)*root.chat-height + root.morph*root.settings-height;
+    clip:true;
+    Rectangle {
+        x:8px;y:8px;width:parent.width - 16px;height:parent.height - 16px;
+        border-radius:17px;background:Colors.bg.with-alpha(root.bubble-alpha / 100);
+        border-width:1px;border-color:Colors.fg.with-alpha(0.12 * root.bubble-alpha / 100);
+        visible:root.reply-visible && root.chat-opacity>0;opacity:root.chat-opacity;
+    }
+    pill := Rectangle {
+        x:8px;y:8px - root.morph * 24px;width:parent.width - 16px;height:root.input-height + 20px;
+        visible:root.chat-opacity>0;opacity:root.chat-opacity;
+        background:Colors.bg;border-radius:17px;border-width:1px;border-color:Colors.fg.with-alpha(0.16);
+        HorizontalLayout {padding-left:10px;padding-right:8px;padding-top:10px;padding-bottom:10px;spacing:7px;
+            Rectangle {width:22px;
+                Text {text:"⠿";color:Colors.fg.with-alpha(0.45);font-size:19px;vertical-alignment:center;}
+                TouchArea {pointer-event(e)=>{if e.kind == PointerEventKind.down {root.drag();}}}
+            }
+            entry-scroll := Flickable {
+                content-width:self.width;
+                content-height:max(self.height,question-editor.preferred-height);
+                question-editor := TextInput {
+                    width:parent.width;height:max(entry-scroll.height,self.preferred-height);
+                    text <=> root.question;single-line:false;wrap:word-wrap;
+                    color:Colors.fg;font-size:15px;enabled:!root.busy;
+                    selection-background-color:Colors.accent;selection-foreground-color:Colors.bg;
+                    key-pressed(e)=>{if e.text==Key.Return && !e.modifiers.shift {if !root.busy {root.send();} return accept;}return reject;}
+                    cursor-position-changed(pos)=>{
+                        if pos.y + entry-scroll.content-y < 0px {entry-scroll.content-y=-pos.y;}
+                        else if pos.y+entry-scroll.content-y>entry-scroll.height - (self.font-metrics.ascent - self.font-metrics.descent) {entry-scroll.content-y=min(0px,max(entry-scroll.height - self.height,entry-scroll.height - pos.y - (self.font-metrics.ascent - self.font-metrics.descent)));}
+                    }
+                }
+                Text {x:0px;y:0px;text:"What's on your mind?";visible:root.question.is-empty;color:Colors.fg.with-alpha(0.45);font-size:15px;}
+            }
+            Tool {label:root.sharing ? "◉" : "+";lit:root.sharing;clicked=>{root.toggle-share();}}
+            Tool {label:root.recording ? "■" : root.transcribing ? "…" : "🎙";lit:root.recording;clicked=>{root.toggle-mic();}}
+            Tool {label:"⚙";clicked=>{root.settings();}}
+            Tool {label:"⌄";clicked=>{root.toggle-bubble();}}
+            Tool {label:root.busy ? "■" : "↑";lit:true;clicked=>{if root.busy {root.stop();}else{root.send();}}}
+        }
+    }
+    Text {x:24px;y:root.input-height + 34px;width:parent.width - 48px;height:14px;
+        text:root.voice-status!="" ? root.voice-status : root.status;color:Colors.fg.with-alpha(0.55);font-size:10px;overflow:elide;
+        opacity:root.chat-opacity;visible:root.chat-opacity>0;
+    }
+    reply-scroll := ScrollView {
+        x:24px;y:root.input-height + 54px;width:parent.width - 48px;height:max(0px,parent.height - root.input-height - 70px);
+        visible:root.reply-visible && root.chat-opacity>0;opacity:root.chat-opacity;
+        horizontal-scrollbar-policy:always-off;
+        content-width:self.visible-width;
+        content-height:current-turn.y+reply.y+max(self.visible-height,reply.preferred-height)+12px;
+        Rectangle {width:reply-scroll.visible-width;height:reply-scroll.content-height;
+            history-column := VerticalLayout {x:12px;y:0px;width:parent.width - 38px;height:self.preferred-height;spacing:24px;
+                for turn in root.past-turns: Rectangle {
+                    height:old-question.preferred-height+old-reply.preferred-height+20px;
+                    old-question := Text {x:0px;y:0px;width:parent.width;height:self.preferred-height;text:turn.question;color:Colors.accent;font-size:16px;wrap:word-wrap;horizontal-alignment:right;}
+                    old-reply := StyledText {y:old-question.height+12px;width:parent.width;height:self.preferred-height;text:root.format-reply(turn.answer);default-color:Colors.fg;default-font-size:round(root.response-font-size)*1px;link-color:Colors.accent;}
+                }
+            }
+            current-turn := Rectangle {
+                x:12px;y:history-column.height+12px;width:parent.width - 38px;height:reply.y+reply.preferred-height;
+                current-question := Text {x:0px;y:0px;width:parent.width;height:root.current-question=="" ? 0px : self.preferred-height;text:root.current-question;color:Colors.accent;font-size:16px;wrap:word-wrap;horizontal-alignment:right;}
+                reply := StyledText {y:current-question.height+12px;width:parent.width;height:self.preferred-height;text:root.format-reply(root.answer);default-color:Colors.fg;default-font-size:round(root.response-font-size)*1px;link-color:Colors.accent;}
+            }
+        }
+    }
+    panel := SettingsPanel {
+        x:8px;y:8px + (1-root.morph)*12px;width:root.settings-width - 16px;height:root.settings-height - 16px;
+        visible:root.morph>0.15;opacity:max(0,(root.morph - 0.15)/0.85);
+        back=>{root.settings-open=false;}
+        quit=>{root.quit();}
+        provider-changed=>{root.provider-changed();}
+        preview-colors=>{root.preview-colors();}
+        drag=>{root.drag();}
+        save=>{root.save();}
+        fetch-models=>{root.fetch-models();}
+        key-edited=>{root.key-edited();}
+        filter-models=>{root.filter-models();}
+        install-shortcut=>{root.install-shortcut();}
+        clear-frames=>{root.clear-frames();}
+        new-chat=>{root.new-chat();}
+    }
+}
+}

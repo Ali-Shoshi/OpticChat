@@ -1,0 +1,8 @@
+Optic Chat v0.1 — Rust + Slint
+
+Settings: 500x500 logical pixels; compact working input; separately movable, always-on-top translucent response window.
+Theme: editable background, foreground and accent colors across the app; adjustable bubble size and background opacity.
+OpenAI: keyring credentials, editable model ID, account model discovery, Responses API with streaming text.
+Capture: explicit screen/window sharing; continuously sample; keep up to 10 visually distinct compressed JPEGs in RAM; attach newest 5 per question; evict oldest; clear/pause controls.
+Shortcut: Ctrl+Alt+Space toggles the response bubble via GNOME custom shortcut and private Unix socket.
+Later: voice input/output.
