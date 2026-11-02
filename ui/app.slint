@@ -262,13 +262,14 @@ component SettingsPanel inherits Rectangle {
             Muted {text:"Edit the system prompt sent with each question. Save to apply it to future responses.";}
             TextEdit {height:180px;text <=> root.system-prompt;wrap:word-wrap;}
             Label {text:"SCREEN CAPTURE";}
-            Muted {text:"Share a screen or window from the input bar. Distinct images stay in memory only; the oldest is evicted at 10. Questions include the latest 5, oldest first.";}
+            Muted {text:"Share a screen or window from the input bar. Up to 10 distinct images stay in memory; older images are evicted. Each question refreshes the current screen and includes up to 5 images, oldest first.";}
             ScreenField {label:"Sample every (s)";value <=> root.interval;}
+            Muted {text:"0.25–30 seconds. Recommended: 0.5. Questions request the next frame at up to 4 fps.";}
             ScreenField {label:"Changed pixels (%)";value <=> root.threshold;}
             ScreenField {label:"Maximum width (px)";value <=> root.image-width;}
             ScreenField {label:"JPEG quality (30–90)";value <=> root.quality;}
             Muted {text:"Low-detail images reduce model context; compression reduces transfer size. Smaller images can hide small text. Re-share after changing resolution or quality.";}
-            screen-last := Action {label:"Clear all buffered screenshots";clicked=>{root.clear-frames();}}
+            screen-last := Action {label:"Stop sharing & clear screenshots";clicked=>{root.clear-frames();}}
         
                 }
             }

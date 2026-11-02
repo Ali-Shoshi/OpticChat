@@ -5,11 +5,23 @@ use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::{
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
+
+fn http_client() -> Result<&'static reqwest::Client> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if CLIENT.get().is_none() {
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(120))
+            .build()?;
+        let _ = CLIENT.set(client);
+    }
+    Ok(CLIENT.get().unwrap())
+}
 
 #[derive(Clone, Default)]
 pub struct Conversation {
@@ -53,7 +65,14 @@ pub fn provider_body(
     frames: &[Frame],
     history: &Conversation,
 ) -> Value {
-    provider_body_with_prompt(provider, model, question, frames, history, crate::config::DEFAULT_PROMPT)
+    provider_body_with_prompt(
+        provider,
+        model,
+        question,
+        frames,
+        history,
+        crate::config::DEFAULT_PROMPT,
+    )
 }
 pub fn provider_body_with_prompt(
     provider: &str,
@@ -233,10 +252,7 @@ async fn ask_at(
     endpoint: &str,
 ) -> Result<String> {
     let anthropic = body.get("messages").is_some();
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(120))
-        .build()?;
+    let client = http_client()?;
     let request = client.post(endpoint);
     let request = if anthropic {
         request
@@ -275,6 +291,8 @@ async fn ask_at(
     let mut decoder = SseDecoder::default();
     let mut answer = String::new();
     let mut completed = false;
+    let mut last_update = Instant::now() - Duration::from_secs(1);
+    let mut displayed_bytes = 0;
     loop {
         if cancel.load(Ordering::Relaxed) {
             anyhow::bail!("Response stopped")
@@ -286,7 +304,6 @@ async fn ask_at(
                 "content_block_delta" => {
                     if event["delta"]["type"] == "text_delta" {
                         answer.push_str(event["delta"]["text"].as_str().unwrap_or(""));
-                        update(answer.clone());
                     }
                 }
                 "message_stop" => completed = true,
@@ -295,7 +312,6 @@ async fn ask_at(
                 }
                 "response.output_text.delta" => {
                     answer.push_str(event["delta"].as_str().unwrap_or(""));
-                    update(answer.clone());
                 }
                 "response.completed" => completed = true,
                 "response.failed" | "error" => anyhow::bail!(
@@ -312,22 +328,132 @@ async fn ask_at(
                 }
                 _ => {}
             }
+            // Keep streaming responsive without reparsing/repainting the full
+            // Markdown response for every tiny token delta.
+            if answer.len() != displayed_bytes && last_update.elapsed() >= Duration::from_millis(33)
+            {
+                update(answer.clone());
+                displayed_bytes = answer.len();
+                last_update = Instant::now();
+            }
+            if completed {
+                break;
+            }
+        }
+        // Completion is terminal, even if a local server keeps SSE open.
+        if completed {
+            break;
         }
     }
     anyhow::ensure!(
         completed && !answer.is_empty(),
         "No complete text reply. Choose a model that supports text and image input."
     );
+    if answer.len() != displayed_bytes {
+        update(answer.clone());
+    }
     Ok(answer)
 }
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn terminal_events_finish_without_waiting_for_socket_close() {
+        use std::io::{Read, Write};
+        for anthropic in [false, true] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/test", listener.local_addr().unwrap());
+            let (release, wait) = std::sync::mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0; 4096];
+                loop {
+                    let n = socket.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&buf[..n]);
+                    if let Some(end) = request.windows(4).position(|b| b == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                        let size: usize = headers
+                            .lines()
+                            .find_map(|l| l.strip_prefix("content-length:"))
+                            .unwrap()
+                            .trim()
+                            .parse()
+                            .unwrap();
+                        if request.len() >= end + 4 + size {
+                            break;
+                        }
+                    }
+                }
+                let delta = if anthropic {
+                    json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"語"}})
+                } else {
+                    json!({"type":"response.output_text.delta","delta":"語"})
+                };
+                let done = if anthropic {
+                    "message_stop"
+                } else {
+                    "response.completed"
+                };
+                let events = format!(
+                    "{}data: {}\n\n",
+                    format!("data: {delta}\n\n").repeat(100),
+                    json!({"type":done})
+                );
+                write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: keep-alive\r\n\r\n{events}").unwrap();
+                socket.flush().unwrap();
+                // No Content-Length or EOF: a client must honor the terminal event.
+                let _ = wait.recv_timeout(Duration::from_secs(3));
+            });
+            let body = if anthropic {
+                json!({"messages":[]})
+            } else {
+                json!({"input":[]})
+            };
+            let mut updates = Vec::new();
+            let result = tokio::time::timeout(
+                Duration::from_secs(1),
+                ask_at(
+                    "fixture".into(),
+                    body,
+                    Arc::new(AtomicBool::new(false)),
+                    |s| updates.push(s),
+                    &url,
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(result, "語".repeat(100));
+            assert_eq!(updates.last(), Some(&result));
+            assert!(
+                updates.len() < 50,
+                "Tiny deltas should be coalesced for UI rendering"
+            );
+            release.send(()).unwrap();
+            server.join().unwrap();
+        }
+    }
     #[test]
     fn custom_prompt_reaches_every_provider() {
         let prompt = "Give practical steps in Spanish.";
         for provider in ["openai", "anthropic", "hermes", "lmstudio"] {
-            let body = super::provider_body_with_prompt(provider, "test", "Help", &[], &super::Conversation::default(), prompt);
-            let field = if provider == "anthropic" { "system" } else { "instructions" };
+            let body = super::provider_body_with_prompt(
+                provider,
+                "test",
+                "Help",
+                &[],
+                &super::Conversation::default(),
+                prompt,
+            );
+            let field = if provider == "anthropic" {
+                "system"
+            } else {
+                "instructions"
+            };
             assert_eq!(body[field], prompt, "{provider}");
         }
     }

@@ -428,6 +428,7 @@ fn main() -> Result<()> {
     let buffer = Arc::new(Mutex::new(buffer::FrameBuffer::default()));
     let history = Arc::new(Mutex::new(api::Conversation::default()));
     let capture_stop = Arc::new(AtomicBool::new(true));
+    let capture_refresh = Arc::new(AtomicBool::new(false));
     let alive = Arc::new(AtomicBool::new(true));
     let request_cancel = Arc::new(Mutex::new(Arc::new(AtomicBool::new(false))));
     let bubble_visible = Arc::new(AtomicBool::new(false));
@@ -507,11 +508,13 @@ fn main() -> Result<()> {
     }
     {
         let buffer = buffer.clone();
+        let stop = capture_stop.clone();
         let w = settings.as_weak();
         settings.on_clear_frames(move || {
-            buffer.lock().unwrap().clear();
+            capture::stop_and_clear(&stop, &buffer);
             if let Some(w) = w.upgrade() {
-                w.set_message("Screenshots cleared from memory.".into());
+                w.set_message("Screenshots cleared and sharing stopped. Click + to share again.".into());
+                w.set_status("Screenshots cleared • 0/10 frames • sharing stopped".into());
             }
         });
     }
@@ -747,6 +750,7 @@ fn main() -> Result<()> {
         let cfg = cfg.clone();
         let buffer = buffer.clone();
         let stop = capture_stop.clone();
+        let refresh = capture_refresh.clone();
         input.on_toggle_share(move || {
             let Some(ui) = w.upgrade() else { return };
             if ui.get_sharing() {
@@ -755,26 +759,31 @@ fn main() -> Result<()> {
                 return;
             }
             ui.set_sharing(true);
+            buffer.lock().unwrap().clear();
+            refresh.store(false, Ordering::Relaxed);
             stop.store(false, Ordering::Relaxed);
             let w = w.clone();
             let cfg = cfg.clone();
             let buffer = buffer.clone();
             let stop = stop.clone();
+            let refresh = refresh.clone();
             rt.spawn(async move {
                 let ws = w.clone();
-                let result = capture::run(cfg, buffer, stop.clone(), move |s| {
+                let status_stop = stop.clone();
+                let result = capture::run(cfg, buffer.clone(), stop.clone(), refresh, move |s| {
                     let w = ws.clone();
+                    let stop = status_stop.clone();
                     let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = w.upgrade() {
+                        if let Some(w) = w.upgrade().filter(|_| !stop.load(Ordering::Relaxed)) {
                             w.set_status(s.into());
                         }
                     });
                 })
                 .await;
-                stop.store(true, Ordering::Relaxed);
+                capture::stop_and_clear(&stop, &buffer);
                 let text = match result {
-                    Ok(()) => "Paused • buffered frames kept until cleared or exit".into(),
-                    Err(e) => format!("Capture: {e}"),
+                    Ok(()) => "Sharing stopped • 0/10 frames".into(),
+                    Err(e) => format!("Capture: {e} • buffer cleared"),
                 };
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = w.upgrade() {
@@ -795,6 +804,8 @@ fn main() -> Result<()> {
         let history = history.clone();
         let cancels = request_cancel.clone();
         let visible = bubble_visible.clone();
+        let capture_stop = capture_stop.clone();
+        let refresh = capture_refresh.clone();
         input.on_send(move || {
             let Some(ui) = w.upgrade() else { return };
             if ui.get_busy() || ui.get_recording() || ui.get_transcribing() {
@@ -815,12 +826,7 @@ fn main() -> Result<()> {
                     return;
                 }
             };
-            let frames = buffer.lock().unwrap().latest_five();
             let h = history.lock().unwrap().clone();
-            let mut body = api::provider_body_with_prompt(&c.provider, &c.model, &question, &frames, &h, &c.system_prompt);
-            if c.provider == "lmstudio" {
-                body["optic_lmstudio_url"] = serde_json::json!(c.lmstudio_url);
-            }
             let cancel = Arc::new(AtomicBool::new(false));
             *cancels.lock().unwrap() = cancel.clone();
             ui.set_busy(true);
@@ -829,7 +835,7 @@ fn main() -> Result<()> {
                 b.set_past_turns(ModelRc::new(VecModel::from(h.turns.iter().map(|(q,a)| ChatTurn { question:q.as_str().into(), answer:a.as_str().into() }).collect::<Vec<_>>())));
                 b.set_current_question(question.clone().into());
                 b.set_busy(true);
-                b.set_answer(format!("Looking at {} recent screens…", frames.len()).into());
+                b.set_answer(if capture_stop.load(Ordering::Relaxed) { "Thinking…" } else { "Getting the latest screen…" }.into());
                 b.set_reply_visible(true);
                 let weak = b.as_weak();
                 slint::Timer::single_shot(std::time::Duration::from_millis(30), move || {
@@ -840,26 +846,35 @@ fn main() -> Result<()> {
             let w = w.clone();
             let b = b.clone();
             let history = history.clone();
+            let buffer = buffer.clone();
+            let capture_stop = capture_stop.clone();
+            let refresh = refresh.clone();
             rt.spawn(async move {
                 let bw = b.clone();
                 let mut first_chunk = true;
-                let result = api::ask(key, body, cancel, move |answer| {
-                    let b = bw.clone();
-                    let reveal = first_chunk;
-                    first_chunk = false;
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(b) = b.upgrade() {
-                            b.set_answer(answer.into());
-                            if reveal {
-                                let weak = b.as_weak();
-                                slint::Timer::single_shot(std::time::Duration::from_millis(30), move || {
-                                    if let Some(ui) = weak.upgrade() { ui.invoke_reveal_response(); }
-                                });
+                let result: Result<String> = async {
+                    let frames = capture::fresh_frames(&buffer, &capture_stop, &refresh, &cancel).await?;
+                    let mut body = api::provider_body_with_prompt(&c.provider, &c.model, &question, &frames, &h, &c.system_prompt);
+                    if c.provider == "lmstudio" {
+                        body["optic_lmstudio_url"] = serde_json::json!(c.lmstudio_url);
+                    }
+                    api::ask(key, body, cancel, move |answer| {
+                        let b = bw.clone();
+                        let reveal = first_chunk;
+                        first_chunk = false;
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(b) = b.upgrade() {
+                                b.set_answer(answer.into());
+                                if reveal {
+                                    let weak = b.as_weak();
+                                    slint::Timer::single_shot(std::time::Duration::from_millis(30), move || {
+                                        if let Some(ui) = weak.upgrade() { ui.invoke_reveal_response(); }
+                                    });
+                                }
                             }
-                        }
-                    });
-                })
-                .await;
+                        });
+                    }).await
+                }.await;
                 if let Ok(answer) = &result {
                     history
                         .lock()
@@ -892,10 +907,12 @@ fn main() -> Result<()> {
         let b = bubble.as_weak();
         let buffer = buffer.clone();
         let visible = bubble_visible.clone();
+        let capture_stop = capture_stop.clone();
         desktop::listen(alive.clone(), move |command| {
             if command == "status" {
-                let (count, bytes) = buffer.lock().unwrap().stats();
-                return serde_json::json!({"running":true,"buffered_frames":count,"buffer_bytes":bytes,"bubble_visible":visible.load(Ordering::Relaxed)}).to_string();
+                let frames = buffer.lock().unwrap();
+                let (count, bytes) = frames.stats();
+                return serde_json::json!({"running":true,"buffered_frames":count,"buffer_bytes":bytes,"latest_frame_age_seconds":frames.latest_age_seconds(),"capture_active":!capture_stop.load(Ordering::Relaxed),"bubble_visible":visible.load(Ordering::Relaxed)}).to_string();
             }
             let w = w.clone();
             let b = b.clone();

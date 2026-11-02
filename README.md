@@ -26,12 +26,13 @@ Install an Applications launcher with `./scripts/install-desktop.sh`.
 
 ## Screen buffer
 
-- One permissioned ScreenCast session; the local capture helper samples at 1 fps, with an adjustable 1–30 second acceptance cadence (default 2 s).
-- A 64×36 RGB thumbnail detects substantial visual changes. Pixels must change by an average of at least 24 levels; the configured percentage of changed pixels is compared against **all** retained signatures. Cursor motion is excluded. Returning to an already retained scene moves it to the newest position and refreshes its timestamp.
-- At most 10 distinct JPEGs are held in RAM; frame 11 evicts frame 1. Each question snapshots the newest five. There are no screenshot files or unlimited history. Images in an in-flight request are released when it finishes.
+- One permissioned ScreenCast session; the helper samples at up to 4 fps, with an adjustable 0.25–30 second background acceptance cadence (default 0.5 s). PipeWire keepalives preserve the final update when a screen becomes still. Each question bypasses the background cadence and requests the next frame (normally within a quarter-second); a stalled capture times out after 3 seconds instead of sending an old image.
+- JPEGs are compressed once in GStreamer and retained without recompression. Thumbnail preparation runs outside the shared buffer lock; byte-identical frames reuse their cached thumbnail and JPEG allocation. A one-frame leaky queue prevents the helper building a history of obsolete work under load.
+- A 64×36 RGB thumbnail detects substantial visual changes. Pixels must change by an average of at least 24 levels; the configured percentage of changed pixels is compared against retained signatures. Cursor motion is excluded. Similar or revisited scenes replace their JPEG with the actual new image and move to the newest position. Small text edits remain visible without filling history with near-duplicates.
+- At most 10 distinct JPEGs are held in RAM; frame 11 evicts frame 1. Each question uses up to five images, ending with the freshly sampled screen. There are no screenshot files or unlimited history. Images in an in-flight request are released when it finishes.
 - Default maximum width is 1280 px, JPEG quality 60. A hard 1 MB per-image limit bounds retained image storage to 10 MB. Defaults are generally much smaller but image complexity affects size.
 - OpenAI image inputs use `detail: low`. JPEG compression reduces upload bytes; low detail reduces image processing context. Small text may be illegible. Increase resolution/quality if necessary, but low detail still limits fine detail.
-- Pause stops capture but keeps the buffer; Clear deletes the retained images. Old images are age-labeled. Quit releases all frames.
+- Stopping sharing, clearing screenshots, a capture error, or quitting clears the buffer. Clear also stops sharing so the next frame cannot immediately refill it. Click + to share again. Image ages and buffer counts are available through `--status`. The capture helper exits if its parent app dies.
 - Every request uploads only its selected images and text to OpenAI. `store: false` is sent, and only six text exchanges are replayed. API-provider retention policies still apply. No screenshot uploads happen just from sharing a screen.
 
 ## Linux behavior

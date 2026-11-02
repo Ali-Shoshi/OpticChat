@@ -24,7 +24,7 @@ pub struct Config {
     pub bubble_width: u32,
     pub bubble_height: u32,
     pub bubble_opacity: f32,
-    pub sample_seconds: u64,
+    pub sample_seconds: f64,
     pub change_percent: u32,
     pub image_width: u32,
     pub jpeg_quality: u8,
@@ -60,7 +60,7 @@ impl Default for Config {
             bubble_width: 500,
             bubble_height: 280,
             bubble_opacity: 0.0,
-            sample_seconds: 2,
+            sample_seconds: 0.5,
             change_percent: 12,
             image_width: 1280,
             jpeg_quality: 60,
@@ -92,8 +92,14 @@ impl Config {
         }
     }
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(!self.system_prompt.trim().is_empty(), "The AI prompt cannot be empty");
-        anyhow::ensure!((12..=28).contains(&self.response_font_size), "Response text size must be 12–28 px");
+        anyhow::ensure!(
+            !self.system_prompt.trim().is_empty(),
+            "The AI prompt cannot be empty"
+        );
+        anyhow::ensure!(
+            (12..=28).contains(&self.response_font_size),
+            "Response text size must be 12–28 px"
+        );
         anyhow::ensure!(
             ["openai", "anthropic", "hermes", "lmstudio"].contains(&self.provider.as_str()),
             "Unknown provider"
@@ -125,8 +131,8 @@ impl Config {
             "Opacity must be 0–100%"
         );
         anyhow::ensure!(
-            (1..=30).contains(&self.sample_seconds),
-            "Capture interval must be 1–30 seconds"
+            (0.25..=30.0).contains(&self.sample_seconds),
+            "Capture interval must be 0.25–30 seconds"
         );
         anyhow::ensure!(
             (1..=80).contains(&self.change_percent),
@@ -207,6 +213,23 @@ pub fn save_key(provider: &str, key: &str) -> Result<()> {
 mod display_tests {
     use super::Config;
     #[test]
+    fn fractional_capture_intervals_and_old_integer_settings() {
+        let old: Config = serde_json::from_str(r#"{"sample_seconds":2}"#).unwrap();
+        assert_eq!(old.sample_seconds, 2.0);
+        let mut config = Config::default();
+        for interval in [0.25, 0.5, 30.0] {
+            config.sample_seconds = interval;
+            config.validate().unwrap();
+            let saved = serde_json::to_string(&config).unwrap();
+            let loaded: Config = serde_json::from_str(&saved).unwrap();
+            assert_eq!(loaded.sample_seconds, interval);
+        }
+        for interval in [0.0, 0.1, 31.0, f64::NAN] {
+            config.sample_seconds = interval;
+            assert!(config.validate().is_err());
+        }
+    }
+    #[test]
     fn response_size_migrates_and_round_trips() {
         let old: Config = serde_json::from_str("{}").unwrap();
         assert_eq!(old.system_prompt, super::DEFAULT_PROMPT);
@@ -214,7 +237,8 @@ mod display_tests {
         let mut changed = old;
         changed.response_font_size = 24;
         changed.system_prompt = "Answer in short, numbered steps.".into();
-        let restored: Config = serde_json::from_slice(&serde_json::to_vec(&changed).unwrap()).unwrap();
+        let restored: Config =
+            serde_json::from_slice(&serde_json::to_vec(&changed).unwrap()).unwrap();
         assert_eq!(restored.response_font_size, 24);
         assert_eq!(restored.system_prompt, changed.system_prompt);
         restored.validate().unwrap();
