@@ -412,6 +412,7 @@ export component InputWindow inherits Window {
                 question-editor := TextInput {
                     width:parent.width;height:max(entry-scroll.height,self.preferred-height);
                     text <=> root.question;single-line:false;wrap:word-wrap;
+                    vertical-alignment:center;
                     color:Colors.fg;font-size:15px;enabled:!root.busy;
                     selection-background-color:Colors.accent;selection-foreground-color:Colors.bg;
                     key-pressed(e)=>{if e.text==Key.Return && !e.modifiers.shift {if !root.busy {root.send();} return accept;}return reject;}
@@ -420,7 +421,7 @@ export component InputWindow inherits Window {
                         else if pos.y+entry-scroll.content-y>entry-scroll.height - (self.font-metrics.ascent - self.font-metrics.descent) {entry-scroll.content-y=min(0px,max(entry-scroll.height - self.height,entry-scroll.height - pos.y - (self.font-metrics.ascent - self.font-metrics.descent)));}
                     }
                 }
-                Text {x:0px;y:0px;text:"What's on your mind?";visible:root.question.is-empty;color:Colors.fg.with-alpha(0.45);font-size:15px;}
+                Text {x:0px;y:0px;height:entry-scroll.height;text:"What's on your mind?";visible:root.question.is-empty;color:Colors.fg.with-alpha(0.45);font-size:15px;vertical-alignment:center;}
             }
             Tool {label:root.sharing ? "◉" : "+";lit:root.sharing;clicked=>{root.toggle-share();}}
             Tool {label:root.recording ? "■" : root.transcribing ? "…" : "🎙";lit:root.recording;clicked=>{root.toggle-mic();}}
