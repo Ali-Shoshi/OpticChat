@@ -6,9 +6,13 @@ The main reason I built it is that when I'm learning something new, I don't want
 
 So, if you've experienced the same frustration, give Optic Chat a try!
 
-<video controls src="Optic Chat Demo - Final.mp4" title="Title"></video>
+![Optic Chat answers a question about what’s on the screen](assets/optic-chat-demo-1.gif)
 
-<video controls src="Screencast From 2026-11-11 13-07-52.mp4" title="Title"></video>
+[Watch the screen-sharing demo in full resolution](assets/optic-chat-demo-1.mp4)
+
+![Optic Chat’s floating window moves around the desktop](assets/optic-chat-demo-2.gif)
+
+[Watch the floating window demo in full resolution](assets/optic-chat-demo-2.mp4)
 
 ## Requirements:
 
